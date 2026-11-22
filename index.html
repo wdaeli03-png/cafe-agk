@@ -91,17 +91,86 @@ body{background:radial-gradient(ellipse at 12% 8%,#fff2c8 0%,transparent 38%),ra
 const SUPABASE_URL='https://kzwxhvpbdvprxubrfsnb.supabase.co';
 const SUPABASE_KEY='sb_publishable_u7Y5UqxHOZSBDbgfstb5yQ_n5jPNN1R';
 const sb= supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-let user=null,profile=null,page='dashboard',products=[],categories=[],tx=[],stocks=[],announcements=[];
+let user=null,profile=null,page='dashboard',products=[],categories=[],tx=[],stocks=[],announcements=[],orderCart=[],autoRefreshTimer=null,realtimeChannel=null;
 const money=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 const esc=s=>String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 function msg(id,s){let el=document.getElementById(id);if(el)el.textContent=s}
 async function login(){msg('loginMsg','Memeriksa akun...');let {data,error}=await sb.auth.signInWithPassword({email:document.getElementById('email').value,password:document.getElementById('password').value});if(error){msg('loginMsg',error.message);return}user=data.user;let p=await sb.from('agk_profiles').select('*').eq('id',user.id).maybeSingle();if(p.error||!p.data){await sb.auth.signOut();msg('loginMsg','Profil tidak ditemukan. Periksa agk_profiles.');return}profile=p.data;initApp()}
-async function initApp(){document.getElementById('loginBox').classList.add('hidden');document.getElementById('app').classList.remove('hidden');document.getElementById('headerUser').innerHTML=esc(profile.full_name||user.email)+' • '+esc(profile.role)+' <button class="secondary" onclick="logout()">Keluar</button>';await refresh();renderNav();show('dashboard')}
-async function logout(){await sb.auth.signOut();location.reload()}
-async function refresh(){let [p,c,t,s,a]=await Promise.all([sb.from('agk_products').select('*').order('name'),sb.from('agk_categories').select('*').order('name'),sb.from('agk_transactions').select('*').order('created_at',{ascending:false}),sb.from('agk_inventory').select('*').order('created_at',{ascending:false}),sb.from('agk_announcements').select('*').eq('is_active',true).order('created_at',{ascending:false})]);products=p.data||[];categories=c.data||[];tx=t.data||[];stocks=s.data||[];announcements=a.data||[]}
-function renderNav(){let items=['dashboard','transaksi','stok','menu'];if(profile.role==='owner')items.push('laporan','informasi');document.getElementById('nav').innerHTML=items.map(x=>`<button class="${page===x?'active':''}" onclick="show('${x}')">${({dashboard:'Beranda',transaksi:'Pesanan',stok:'Stok',menu:'Kelola Menu',laporan:'Laporan',informasi:'Informasi'})[x]}</button>`).join('')}
+async function initApp(){
+ document.getElementById('loginBox').classList.add('hidden');
+ document.getElementById('app').classList.remove('hidden');
+ document.getElementById('headerUser').innerHTML=esc(profile.full_name||user.email)+' • '+esc(profile.role||'pengguna')+' <button class="secondary" onclick="logout()">Keluar</button>';
+ await refresh(); renderNav(); show('dashboard'); startAutoUpdates();
+}
+async function logout(){
+ if(autoRefreshTimer)clearInterval(autoRefreshTimer);
+ if(realtimeChannel)await sb.removeChannel(realtimeChannel);
+ await sb.auth.signOut(); location.reload();
+}
+async function refresh(){
+ const [p,c,t,s,a]=await Promise.all([
+  sb.from('agk_products').select('*').order('name'),
+  sb.from('agk_categories').select('*').order('name'),
+  sb.from('agk_transactions').select('*').order('created_at',{ascending:false}),
+  sb.from('agk_inventory').select('*').order('created_at',{ascending:false}),
+  sb.from('agk_announcements').select('*').order('created_at',{ascending:false})
+ ]);
+ const errors=[p.error,c.error,t.error,s.error,a.error].filter(Boolean);
+ products=p.data||[]; categories=c.data||[]; tx=t.data||[]; stocks=s.data||[]; announcements=a.data||[];
+ if(errors.length) console.warn('Sebagian data Cafe AGK gagal dimuat:',errors);
+}
+function startAutoUpdates(){
+ if(autoRefreshTimer)clearInterval(autoRefreshTimer);
+ autoRefreshTimer=setInterval(async()=>{
+  await refresh();
+  if(isEditingForm())return;
+  if(page==='dashboard')dashboard(document.getElementById('content'));
+  else if(page==='transaksi')transactions(document.getElementById('content'));
+  else if(page==='stok')inventory(document.getElementById('content'));
+  else if(page==='menu')menus(document.getElementById('content'));
+  else if(page==='laporan')reports(document.getElementById('content'));
+  else if(page==='informasi')announcementManager(document.getElementById('content'));
+ },30000);
+ if(realtimeChannel)sb.removeChannel(realtimeChannel);
+ realtimeChannel=sb.channel('agk-live-updates')
+  .on('postgres_changes',{event:'*',schema:'public',table:'agk_products'},()=>refreshAndRender())
+  .on('postgres_changes',{event:'*',schema:'public',table:'agk_categories'},()=>refreshAndRender())
+  .on('postgres_changes',{event:'*',schema:'public',table:'agk_transactions'},()=>refreshAndRender())
+  .on('postgres_changes',{event:'*',schema:'public',table:'agk_inventory'},()=>refreshAndRender())
+  .on('postgres_changes',{event:'*',schema:'public',table:'agk_announcements'},()=>refreshAndRender())
+  .subscribe();
+}
+function isEditingForm(){const el=document.activeElement;return !!el&&(['INPUT','TEXTAREA','SELECT'].includes(el.tagName));}
+async function refreshAndRender(){
+ await refresh();
+ if(isEditingForm())return;
+ const c=document.getElementById('content'); if(!c)return;
+ if(page==='dashboard')dashboard(c);
+ else if(page==='transaksi')transactions(c);
+ else if(page==='stok')inventory(c);
+ else if(page==='menu')menus(c);
+ else if(page==='laporan')reports(c);
+ else if(page==='informasi')announcementManager(c);
+}
+function renderNav(){
+ const items=['dashboard','transaksi','stok','menu','laporan','informasi'];
+ document.getElementById('nav').innerHTML=items.map(x=>`<button class="${page===x?'active':''}" onclick="show('${x}')">${({dashboard:'Beranda',transaksi:'Pesanan',stok:'Stok',menu:'Kelola Menu',laporan:'Laporan',informasi:'Informasi'})[x]}</button>`).join('');
+}
 async function show(p){page=p;renderNav();await refresh();let c=document.getElementById('content');if(p==='dashboard')dashboard(c);if(p==='transaksi')transactions(c);if(p==='stok')inventory(c);if(p==='menu')menus(c);if(p==='laporan')reports(c);if(p==='informasi')announcementManager(c)}
-function dashboard(c){c.innerHTML=`<div class="card" style="min-height:220px;display:flex;flex-direction:column;justify-content:center;text-align:center"><h2>Selamat Datang di Cafe AGK</h2><p class="muted">Silakan pilih salah satu menu pada panel sebelah kiri untuk mulai bekerja.</p></div>`}
+function dashboard(c){
+ const today=dateLocal(new Date());
+ const todayTx=tx.filter(x=>dateLocal(new Date(x.created_at))===today);
+ const sales=todayTx.filter(x=>['sale','penjualan'].includes(String(x.transaction_type).toLowerCase())).reduce((n,x)=>n+Number(x.amount||0),0);
+ const expenses=todayTx.filter(x=>['expense','pengeluaran'].includes(String(x.transaction_type).toLowerCase())).reduce((n,x)=>n+Number(x.amount||0),0);
+ const activeProducts=products.filter(x=>x.is_active!==false).length;
+ c.innerHTML=`<div class="card"><h2>Selamat Datang di Cafe AGK</h2><p class="muted">Ringkasan operasional hari ini. Data diperbarui otomatis.</p><div class="grid">
+ <div class="card"><div class="muted">Penjualan hari ini</div><div class="stat">${money(sales)}</div></div>
+ <div class="card"><div class="muted">Pengeluaran hari ini</div><div class="stat">${money(expenses)}</div></div>
+ <div class="card"><div class="muted">Selisih hari ini</div><div class="stat">${money(sales-expenses)}</div></div>
+ <div class="card"><div class="muted">Menu aktif</div><div class="stat">${activeProducts}</div></div></div></div>
+ <div class="card"><h3>Informasi untuk Tim</h3>${announcements.filter(x=>x.is_active!==false).slice(0,5).map(x=>`<div class="notice" style="margin:8px 0">${esc(x.message)}<div class="small muted">${esc(new Date(x.created_at).toLocaleString('id-ID'))}</div></div>`).join('')||'<p class="muted">Belum ada informasi aktif.</p>'}
+ <div class="small muted">Pembaruan otomatis setiap 30 detik dan melalui sinkronisasi realtime jika tersedia.</div></div>`;
+}
 function transactions(c){c.innerHTML=`<div class="card"><h2>Pesanan Karyawan</h2><p class="muted">Pilih kategori dan menu, lalu masukkan jumlah pesanan.</p><div class="actions"><button onclick="orderCategory('Makanan')">🍛 Makanan</button><button onclick="orderCategory('Minuman')">☕ Minuman</button><button onclick="orderCategory('Snack')">🍟 Snack</button></div><div id="orderItems" class="grid" style="margin-top:14px"></div><div class="card"><h3>Keranjang Pesanan</h3><div id="cartItems"></div><div class="stat" id="cartTotal">Rp 0</div><button onclick="saveOrder()">Simpan Pesanan</button><button class="secondary" onclick="clearCart()">Kosongkan</button><p id="orderMsg" class="muted"></p></div></div><div class="card"><h2>Transaksi Manual (opsional)</h2><div class="row"><div><label>Jenis</label><select id="tt"><option value="sale">Penjualan</option><option value="expense">Pengeluaran</option></select></div><div><label>Jumlah (Rp)</label><input id="amount" type="number" min="0" placeholder="Jumlah rupiah"></div></div><label>Keterangan</label><input id="desc" placeholder="Contoh: beli bahan"><button onclick="saveTx()">Simpan Transaksi</button><p id="txMsg" class="muted"></p></div><div class="card"><h3>Transaksi terbaru</h3><div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Jumlah</th><th>Keterangan</th></tr></thead><tbody>${tx.slice(0,80).map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('id-ID'))}</td><td>${esc(x.transaction_type)}</td><td>${money(x.amount)}</td><td>${esc(x.description||'')}</td></tr>`).join('')}</tbody></table></div></div>`;orderCategory('Makanan');renderCart()}
 function orderCategory(cat){let target=document.getElementById('orderItems');if(!target)return;let list=products.filter(p=>p.is_active!==false&&categories.some(k=>String(k.id)===String(p.category_id)&&k.name.toLowerCase()===cat.toLowerCase()));target.innerHTML=list.length?list.map(p=>`<div class="card"><strong>${esc(p.name)}</strong><p class="muted">${money(p.price)}</p><button onclick="addToCart(${p.id})">Tambah</button></div>`).join(''):`<div class="notice">Menu ${esc(cat)} belum tersedia.</div>`}
 function addToCart(id){let p=products.find(x=>String(x.id)===String(id));if(!p)return;let item=orderCart.find(x=>String(x.id)===String(id));if(item)item.qty++;else orderCart.push({id:p.id,name:p.name,price:Number(p.price),qty:1});renderCart()}
@@ -113,12 +182,17 @@ async function saveOrder(){if(!orderCart.length)return msg('orderMsg','Pilih men
 async function saveTx(){let amount=Number(document.getElementById('amount').value),type=document.getElementById('tt').value,description=document.getElementById('desc').value;if(!amount||amount<0){msg('txMsg','Masukkan jumlah yang benar.');return}let {error}=await sb.from('agk_transactions').insert({transaction_type:type,amount,description,created_by:user.id});msg('txMsg',error?error.message:'Transaksi berhasil disimpan.');if(!error)show('transaksi')}
 function inventory(c){c.innerHTML=`<div class="card"><h2>Catat Stok</h2><div class="row"><div><label>Nama barang</label><input id="sn" placeholder="Contoh: Kopi"></div><div><label>Stok awal</label><input id="so" type="number" value="0"></div><div><label>Stok masuk</label><input id="si" type="number" value="0"></div><div><label>Stok keluar</label><input id="su" type="number" value="0"></div></div><button onclick="saveStock()">Simpan Stok</button><p id="stockMsg" class="muted"></p></div><div class="card"><h3>Catatan Stok</h3><div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Barang</th><th>Awal</th><th>Masuk</th><th>Keluar</th><th>Akhir</th><th>Petugas</th></tr></thead><tbody>${stocks.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('id-ID'))}</td><td>${esc(x.product_name)}</td><td>${esc(x.opening)}</td><td>${esc(x.incoming)}</td><td>${esc(x.outgoing)}</td><td>${esc(x.ending)}</td><td>${esc(x.created_by||'')}</td></tr>`).join('')}</tbody></table></div></div>`}
 async function saveStock(){let opening=Number(document.getElementById('so').value||0),incoming=Number(document.getElementById('si').value||0),outgoing=Number(document.getElementById('su').value||0),product_name=document.getElementById('sn').value.trim();if(!product_name){msg('stockMsg','Nama barang harus diisi.');return}let ending=opening+incoming-outgoing;if(ending<0){msg('stockMsg','Stok akhir tidak boleh minus.');return}let {error}=await sb.from('agk_inventory').insert({product_name,opening,incoming,outgoing,ending,created_by:user.id});msg('stockMsg',error?error.message:'Catatan stok berhasil disimpan.');if(!error)show('stok')}
-function menus(c){let owner=profile.role==='owner';c.innerHTML=`${owner?`<div class="card"><h2>Tambah Kategori</h2><div class="row"><div><label>Nama kategori</label><input id="catName" placeholder="Makanan / Minuman / Lainnya"></div><div style="align-self:end"><button onclick="addCat()">Simpan kategori</button></div></div><p id="catMsg" class="muted"></p></div><div class="card"><h2>Tambah Menu</h2><div class="row"><div><label>Nama menu</label><input id="pn" placeholder="Nama makanan/minuman"></div><div><label>Kategori</label><select id="pc"><option value="">Tanpa kategori</option>${categories.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div><div><label>Harga (Rp)</label><input id="pp" type="number" min="0"></div></div><label>Deskripsi</label><input id="pd" placeholder="Opsional"><button onclick="addProduct()">Simpan Menu</button><p id="pMsg" class="muted"></p></div>`:''}<div class="card"><h2>Daftar Menu</h2><div class="tablewrap"><table><thead><tr><th>Nama</th><th>Kategori</th><th>Harga</th><th>Status</th>${owner?'<th>Aksi</th>':''}</tr></thead><tbody>${products.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(categories.find(k=>String(k.id)===String(x.category_id))?.name||'-')}</td><td>${money(x.price)}</td><td>${x.is_active===false?'Nonaktif':'Aktif'}</td>${owner?`<td class="actions"><button class="secondary" onclick="editProduct(${x.id})">Edit</button><button class="danger" onclick="delProduct(${x.id})">Hapus</button></td>`:''}</tr>`).join('')}</tbody></table></div></div>`}
+function menus(c){
+ c.innerHTML=`<div class="card"><h2>Tambah Kategori</h2><div class="row"><div><label>Nama kategori</label><input id="catName" placeholder="Makanan / Minuman / Lainnya"></div><div style="align-self:end"><button onclick="addCat()">Simpan kategori</button></div></div><p id="catMsg" class="muted"></p></div>
+ <div class="card"><h2>Tambah Menu</h2><div class="row"><div><label>Nama menu</label><input id="pn" placeholder="Nama makanan/minuman"></div><div><label>Kategori</label><select id="pc"><option value="">Tanpa kategori</option>${categories.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div><div><label>Harga (Rp)</label><input id="pp" type="number" min="0"></div></div><label>Deskripsi</label><input id="pd" placeholder="Opsional"><button onclick="addProduct()">Simpan Menu</button><p id="pMsg" class="muted"></p></div>
+ <div class="card"><h2>Daftar Menu</h2><div class="tablewrap"><table><thead><tr><th>Nama</th><th>Kategori</th><th>Harga</th><th>Status</th><th>Aksi</th></tr></thead><tbody>${products.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(categories.find(k=>String(k.id)===String(x.category_id))?.name||'-')}</td><td>${money(x.price)}</td><td>${x.is_active===false?'Nonaktif':'Aktif'}</td><td class="actions"><button class="secondary" onclick="editProduct(${x.id})">Edit</button><button class="secondary" onclick="toggleProduct(${x.id})">${x.is_active===false?'Aktifkan':'Nonaktifkan'}</button><button class="danger" onclick="delProduct(${x.id})">Hapus</button></td></tr>`).join('')||'<tr><td colspan="5">Belum ada menu.</td></tr>'}</tbody></table></div></div>`;
+}
 async function addCat(){let name=document.getElementById('catName').value.trim();if(!name)return msg('catMsg','Isi nama kategori.');let {error}=await sb.from('agk_categories').insert({name});msg('catMsg',error?error.message:'Kategori disimpan.');if(!error)show('menu')}
 async function addProduct(){let name=document.getElementById('pn').value.trim(),category_id=document.getElementById('pc').value||null,price=Number(document.getElementById('pp').value),description=document.getElementById('pd').value;if(!name||price<0)return msg('pMsg','Isi nama menu dan harga yang benar.');let {error}=await sb.from('agk_products').insert({name,category_id,price,description,is_active:true});msg('pMsg',error?error.message:'Menu berhasil disimpan.');if(!error)show('menu')}
 async function editProduct(id){let x=products.find(p=>String(p.id)===String(id));if(!x)return;let name=prompt('Nama menu:',x.name);if(name===null)return;let price=prompt('Harga:',x.price);if(price===null)return;let description=prompt('Deskripsi:',x.description||'');if(description===null)return;let cat=prompt('ID kategori (kosong jika tanpa kategori):',x.category_id||'');let {error}=await sb.from('agk_products').update({name:name.trim(),price:Number(price),description,category_id:cat||null}).eq('id',id);alert(error?error.message:'Menu diperbarui.');if(!error)show('menu')}
+async function toggleProduct(id){let x=products.find(p=>String(p.id)===String(id));if(!x)return;let {error}=await sb.from('agk_products').update({is_active:x.is_active===false}).eq('id',id);alert(error?error.message:'Status menu diperbarui.');if(!error)show('menu')}
 async function delProduct(id){if(!confirm('Hapus menu ini?'))return;let {error}=await sb.from('agk_products').delete().eq('id',id);alert(error?error.message:'Menu dihapus.');if(!error)show('menu')}
-function reports(c){if(profile.role!=='owner'){c.innerHTML='<div class="card">Laporan khusus pemilik.</div>';return}c.innerHTML=`<div class="card"><h2>Laporan Cafe AGK</h2><div class="reportbuttons"><button onclick="reportPreset('day')">Harian</button><button onclick="reportPreset('week')">Mingguan</button><button onclick="reportPreset('month')">Bulanan</button></div><div class="row"><div><label>Dari tanggal</label><input type="date" id="from"></div><div><label>Sampai tanggal</label><input type="date" id="to"></div></div><button onclick="filterReport()">Tampilkan</button> <button class="secondary" onclick="reportPreset('day')">Hari ini</button><div id="reportOut"></div></div>`;reportPreset('day')}
+function reports(c){c.innerHTML=`<div class="card"><h2>Laporan Cafe AGK</h2><div class="reportbuttons"><button onclick="reportPreset('day')">Harian</button><button onclick="reportPreset('week')">Mingguan</button><button onclick="reportPreset('month')">Bulanan</button></div><div class="row"><div><label>Dari tanggal</label><input type="date" id="from"></div><div><label>Sampai tanggal</label><input type="date" id="to"></div></div><button onclick="filterReport()">Tampilkan</button> <button class="secondary" onclick="reportPreset('day')">Hari ini</button><div id="reportOut"></div></div>`;reportPreset('day')}
 function dateLocal(d){let z=new Date(d.getTime()-d.getTimezoneOffset()*60000);return z.toISOString().slice(0,10)}
 function reportPreset(kind){let now=new Date(),start=new Date(now),end=new Date(now);if(kind==='week'){let dow=(now.getDay()+6)%7;start.setDate(now.getDate()-dow);end.setDate(start.getDate()+6)}else if(kind==='month'){start=new Date(now.getFullYear(),now.getMonth(),1);end=new Date(now.getFullYear(),now.getMonth()+1,0)}document.getElementById('from').value=dateLocal(start);document.getElementById('to').value=dateLocal(end);filterReport()}
 function filterReport(){let from=document.getElementById('from')?.value,to=document.getElementById('to')?.value;if(!document.getElementById('reportOut'))return;let filtered=tx.filter(x=>{let d=dateLocal(new Date(x.created_at));return(!from||d>=from)&&(!to||d<=to)});let sale=filtered.filter(x=>['sale','penjualan'].includes(x.transaction_type)).reduce((a,x)=>a+Number(x.amount||0),0),exp=filtered.filter(x=>['expense','pengeluaran'].includes(x.transaction_type)).reduce((a,x)=>a+Number(x.amount||0),0);let net=sale-exp;let label=(from||'Semua tanggal')+' sampai '+(to||'');let rows=filtered.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('id-ID'))}</td><td>${esc(x.transaction_type)}</td><td>${money(x.amount)}</td><td>${esc(x.description||'')}</td></tr>`).join('');document.getElementById('reportOut').innerHTML=`<div id="reportPrintable"><h3>Periode: ${esc(label)}</h3><div class="grid"><div class="card"><div class="muted">Penjualan</div><div class="stat">${money(sale)}</div></div><div class="card"><div class="muted">Pengeluaran</div><div class="stat">${money(exp)}</div></div><div class="card"><div class="muted">Selisih</div><div class="stat">${money(net)}</div></div></div><div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Jenis</th><th>Jumlah</th><th>Keterangan</th></tr></thead><tbody>${rows||'<tr><td colspan="4">Tidak ada transaksi pada periode ini.</td></tr>'}</tbody></table></div></div><button onclick="downloadReportPDF()">Download PDF</button>`}
@@ -129,7 +203,7 @@ body{background:radial-gradient(ellipse at 12% 8%,#fff2c8 0%,transparent 38%),ra
 .card,.login{background:linear-gradient(145deg,#fffdf7,#fff7e4)!important;border:1px solid #dfbd71!important;box-shadow:0 10px 26px rgba(105,72,18,.16),inset 0 1px 0 #fff!important}
 
 </style></head><body><h2>Cafe AGK</h2><h3>Laporan Transaksi</h3>${source.innerHTML}<script>window.onload=function(){setTimeout(function(){window.print()},300)}<\/script></body></html>`);win.document.close()}
-async function announcementManager(c){if(profile.role!=='owner'){c.innerHTML='Akses khusus pemilik.';return}c.innerHTML=`<div class="card"><h2>Informasi untuk Karyawan</h2><textarea id="announcementText" rows="4" placeholder="Isi pengumuman atau informasi..."></textarea><button onclick="publishAnnouncement()">Terbitkan</button><p id="announcementMsg"></p></div><div class="card"><h3>Informasi Aktif</h3>${announcements.map(x=>`<div class="card"><p>${esc(x.message)}</p><button class="danger" onclick="deactivateAnnouncement(${x.id})">Nonaktifkan</button></div>`).join('')||'Belum ada pengumuman aktif.'}</div>`}
+async function announcementManager(c){c.innerHTML=`<div class="card"><h2>Informasi Cafe AGK</h2><p class="muted">Semua akun yang masuk dapat menerbitkan dan mengelola informasi.</p><textarea id="announcementText" rows="4" placeholder="Isi pengumuman atau informasi..."></textarea><button onclick="publishAnnouncement()">Terbitkan</button><p id="announcementMsg"></p></div><div class="card"><h3>Daftar Informasi</h3>${announcements.map(x=>`<div class="card"><p>${esc(x.message)}</p><div class="small muted">${esc(new Date(x.created_at).toLocaleString('id-ID'))} • ${x.is_active===false?'Nonaktif':'Aktif'}</div>${x.is_active===false?'':`<button class="danger" onclick="deactivateAnnouncement(${x.id})">Nonaktifkan</button>`}</div>`).join('')||'Belum ada informasi.'}</div>`}
 async function publishAnnouncement(){let field=document.getElementById('announcementText')||document.getElementById('quickAnnouncement');let message=field?.value.trim();if(!message){msg('announcementMsg','Isi informasi terlebih dahulu.');return}let {error}=await sb.from('agk_announcements').insert({message,created_by:user.id,is_active:true});msg('announcementMsg',error?error.message:'Informasi berhasil diterbitkan.');if(!error)show(profile.role==='owner'?'informasi':'dashboard')}
 async function deactivateAnnouncement(id){if(!confirm('Nonaktifkan informasi ini?'))return;let {error}=await sb.from('agk_announcements').update({is_active:false}).eq('id',id);if(error)alert(error.message);else show('informasi')}
 
