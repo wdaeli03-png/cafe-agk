@@ -15,7 +15,8 @@
 <div class="page" id="menu"><div class="panel"><h2>Menu makanan & minuman</h2><p class="muted">Menu awal dibaca dari database. Pengelolaan katalog akan disiapkan pada tahap berikutnya.</p><div class="tablewrap"><table><thead><tr><th>Nama</th><th>Kategori</th><th>Harga</th></tr></thead><tbody id="menuTable"></tbody></table></div></div></div>
 </main><nav class="mobile-nav" id="mobileNav"></nav></div>
 <script>
-const SUPABASE_URL='GANTI_DENGAN_SUPABASE_PROJECT_URL';const SUPABASE_ANON_KEY='GANTI_DENGAN_SUPABASE_ANON_KEY';
+const SUPABASE_URL='https://kzwxhvpbdvprxubrfsnb.supabase.co';
+const SUPABASE_ANON_KEY='sb_publishable_u7Y5UqxHOZSBDbgfstb5yQ_n5jPNN1R';
 let sb=null,user=null,role=null,transactions=[],stocks=[],products=[],profiles={};const rupiah=n=>'Rp '+Number(n||0).toLocaleString('id-ID');
 const menuItems=[['dashboard','Dashboard'],['entry','Transaksi'],['inventory','Stok'],['reports','Laporan'],['menu','Menu']];
 function showMsg(t){document.getElementById('loginMsg').textContent=t}
