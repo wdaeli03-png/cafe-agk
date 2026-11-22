@@ -211,8 +211,36 @@ function clearCart(){orderCart=[];renderCart();msg('orderMsg','Keranjang dikoson
 async function saveOrder(){if(!orderCart.length)return msg('orderMsg','Pilih menu terlebih dahulu.');let total=orderCart.reduce((a,x)=>a+x.price*x.qty,0);let description='Pesanan: '+orderCart.map(x=>x.name+' x'+x.qty).join(', ');let {error}=await sb.from('agk_transactions').insert({transaction_type:'sale',amount:total,description,created_by:user.id});msg('orderMsg',error?error.message:'Pesanan berhasil disimpan.');if(!error){orderCart=[];show('transaksi')}}
 
 async function saveTx(){let amount=Number(document.getElementById('amount').value),type=document.getElementById('tt').value,description=document.getElementById('desc').value;if(!amount||amount<0){msg('txMsg','Masukkan jumlah yang benar.');return}let {error}=await sb.from('agk_transactions').insert({transaction_type:type,amount,description,created_by:user.id});msg('txMsg',error?error.message:'Transaksi berhasil disimpan.');if(!error)show('transaksi')}
-function inventory(c){c.innerHTML=`<div class="card"><h2>Catat Stok</h2><div class="row"><div><label>Nama barang</label><input id="sn" placeholder="Contoh: Kopi"></div><div><label>Stok awal</label><input id="so" type="number" value="0"></div><div><label>Stok masuk</label><input id="si" type="number" value="0"></div><div><label>Stok keluar</label><input id="su" type="number" value="0"></div></div><button onclick="saveStock()">Simpan Stok</button><p id="stockMsg" class="muted"></p></div><div class="card"><h3>Catatan Stok</h3><div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Barang</th><th>Awal</th><th>Masuk</th><th>Keluar</th><th>Akhir</th><th>Petugas</th></tr></thead><tbody>${stocks.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('id-ID'))}</td><td>${esc(x.product_name)}</td><td>${esc(x.opening)}</td><td>${esc(x.incoming)}</td><td>${esc(x.outgoing)}</td><td>${esc(x.ending)}</td><td>${esc(x.created_by||'')}</td></tr>`).join('')}</tbody></table></div></div>`}
-async function saveStock(){let opening=Number(document.getElementById('so').value||0),incoming=Number(document.getElementById('si').value||0),outgoing=Number(document.getElementById('su').value||0),product_name=document.getElementById('sn').value.trim();if(!product_name){msg('stockMsg','Nama barang harus diisi.');return}let ending=opening+incoming-outgoing;if(ending<0){msg('stockMsg','Stok akhir tidak boleh minus.');return}let {error}=await sb.from('agk_inventory').insert({product_name,opening,incoming,outgoing,ending,created_by:user.id});msg('stockMsg',error?error.message:'Catatan stok berhasil disimpan.');if(!error)show('stok')}
+function inventory(c){
+ c.innerHTML=`<div class="card"><h2>Catat Stok</h2><div class="row">
+ <div><label>Nama Barang</label><input id="sn" placeholder="Contoh: Kopi"></div>
+ <div><label>Stok Awal</label><input id="so" type="number" min="0" value="0" oninput="stockPreview()"></div>
+ <div><label>Stok Keluar</label><input id="su" type="number" min="0" value="0" oninput="stockPreview()"></div>
+ <div><label>Stok Akhir (Otomatis)</label><input id="se" type="number" value="0" readonly></div>
+ </div><p class="small muted">Stok akhir dihitung otomatis: Stok Awal − Stok Keluar.</p>
+ <button onclick="saveStock()">Simpan Stok</button><p id="stockMsg" class="muted"></p></div>
+ <div class="card"><h3>Catatan Stok</h3><div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Nama Barang</th><th>Stok Awal</th><th>Stok Keluar</th><th>Stok Akhir</th><th>Petugas</th></tr></thead><tbody>${stocks.map(x=>`<tr><td>${esc(new Date(x.created_at).toLocaleString('id-ID'))}</td><td>${esc(x.product_name)}</td><td>${esc(x.opening)}</td><td>${esc(x.outgoing)}</td><td>${esc(x.ending)}</td><td>${esc(x.created_by||'')}</td></tr>`).join('')||'<tr><td colspan="6">Belum ada catatan stok.</td></tr>'}</tbody></table></div></div>`;
+ stockPreview();
+}
+function stockPreview(){
+ const opening=Number(document.getElementById('so')?.value||0);
+ const outgoing=Number(document.getElementById('su')?.value||0);
+ const ending=Math.max(0,opening-outgoing);
+ const field=document.getElementById('se');
+ if(field)field.value=ending;
+}
+async function saveStock(){
+ let opening=Number(document.getElementById('so').value||0);
+ let outgoing=Number(document.getElementById('su').value||0);
+ let product_name=document.getElementById('sn').value.trim();
+ if(!product_name){msg('stockMsg','Nama barang harus diisi.');return}
+ if(opening<0||outgoing<0||!Number.isFinite(opening)||!Number.isFinite(outgoing)){msg('stockMsg','Jumlah stok tidak boleh negatif.');return}
+ let ending=opening-outgoing;
+ if(ending<0){msg('stockMsg','Stok keluar tidak boleh melebihi stok awal.');return}
+ let {error}=await sb.from('agk_inventory').insert({product_name,opening,incoming:0,outgoing,ending,created_by:user.id});
+ msg('stockMsg',error?error.message:'Catatan stok berhasil disimpan.');
+ if(!error)show('stok');
+}
 function menus(c){
  c.innerHTML=`<div class="card"><h2>Tambah Kategori</h2><div class="row"><div><label>Nama kategori</label><input id="catName" placeholder="Makanan / Minuman / Lainnya"></div><div style="align-self:end"><button onclick="addCat()">Simpan kategori</button></div></div><p id="catMsg" class="muted"></p></div>
  <div class="notice">Akses karyawan dan pemilik: dapat menambah, mengedit, mengaktifkan/nonaktifkan, dan menghapus menu. Simpanan tetap mengikuti izin database Supabase.</div><div class="card"><h2>Tambah Menu</h2><div class="row"><div><label>Nama menu</label><input id="pn" placeholder="Nama makanan/minuman"></div><div><label>Kategori</label><select id="pc"><option value="">Tanpa kategori</option>${categories.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></div><div><label>Harga (Rp)</label><input id="pp" type="number" min="0"></div></div><label>Deskripsi</label><input id="pd" placeholder="Opsional"><button onclick="addProduct()">Simpan Menu</button><p id="pMsg" class="muted"></p></div>
