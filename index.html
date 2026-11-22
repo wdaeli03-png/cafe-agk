@@ -128,8 +128,8 @@ function startAutoUpdates(){
   else if(page==='transaksi')transactions(document.getElementById('content'));
   else if(page==='stok')inventory(document.getElementById('content'));
   else if(page==='menu')menus(document.getElementById('content'));
-  else if(page==='laporan')reports(document.getElementById('content'));
-  else if(page==='informasi')announcementManager(document.getElementById('content'));
+  else if(page==='laporan'&&isOwner())reports(document.getElementById('content'));
+  else if(page==='informasi'&&isOwner())announcementManager(document.getElementById('content'));
  },30000);
  if(realtimeChannel)sb.removeChannel(realtimeChannel);
  realtimeChannel=sb.channel('agk-live-updates')
@@ -149,14 +149,32 @@ async function refreshAndRender(){
  else if(page==='transaksi')transactions(c);
  else if(page==='stok')inventory(c);
  else if(page==='menu')menus(c);
- else if(page==='laporan')reports(c);
- else if(page==='informasi')announcementManager(c);
+ else if(page==='laporan'&&isOwner())reports(c);
+ else if(page==='informasi'&&isOwner())announcementManager(c);
+}
+function isOwner(){
+ const role=String(profile?.role||'').trim().toLowerCase();
+ return ['owner','pemilik'].includes(role);
 }
 function renderNav(){
- const items=['dashboard','transaksi','stok','menu','laporan','informasi'];
+ const items=isOwner()
+  ? ['dashboard','transaksi','stok','menu','laporan','informasi']
+  : ['dashboard','transaksi','stok','menu'];
  document.getElementById('nav').innerHTML=items.map(x=>`<button class="${page===x?'active':''}" onclick="show('${x}')">${({dashboard:'Beranda',transaksi:'Pesanan',stok:'Stok',menu:'Kelola Menu',laporan:'Laporan',informasi:'Informasi'})[x]}</button>`).join('');
 }
-async function show(p){page=p;renderNav();await refresh();let c=document.getElementById('content');if(p==='dashboard')dashboard(c);if(p==='transaksi')transactions(c);if(p==='stok')inventory(c);if(p==='menu')menus(c);if(p==='laporan')reports(c);if(p==='informasi')announcementManager(c)}
+async function show(p){
+ const allowed=['dashboard','transaksi','stok','menu'];
+ if(isOwner())allowed.push('laporan','informasi');
+ if(!allowed.includes(p)){alert('Menu ini hanya dapat diakses oleh pemilik Cafe AGK.');page='dashboard';}
+ else page=p;
+ renderNav();await refresh();let c=document.getElementById('content');
+ if(page==='dashboard')dashboard(c);
+ if(page==='transaksi')transactions(c);
+ if(page==='stok')inventory(c);
+ if(page==='menu')menus(c);
+ if(page==='laporan'&&isOwner())reports(c);
+ if(page==='informasi'&&isOwner())announcementManager(c);
+}
 function dashboard(c){
  const today=dateLocal(new Date());
  const todayTx=tx.filter(x=>dateLocal(new Date(x.created_at))===today);
